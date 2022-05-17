@@ -1,23 +1,25 @@
 //Please write your code below this line.
 'use strict';
 
-const fs = require('fs');
-const REFERRING_PARTNER_ACCOUNT_ID = "referringPartnerAccountId"
+const fsPromises = require('fs/promises');
+require('regenerator-runtime')
 
+const REFERRING_PARTNER_ACCOUNT_ID = "referringPartnerAccountId"
 const TRANSACTION_RESULTS_PATH = 'test/transactions_result.txt'
 const TRANSACTIONS_JSON_PATH = 'test/transactions.json'
 
+let lineIndex = 1;
 
-function getTransactionJsonObjectList() {
-    let transactionJson = fs.readFileSync(TRANSACTIONS_JSON_PATH);
-    return JSON.parse(transactionJson).data
+const getTransactionList = async () => {
+    let buffer = await fsPromises.readFile(TRANSACTIONS_JSON_PATH)
+    return JSON.parse(buffer).data
 }
 
 function transactionListToPartnerAccountMap(transactionList) {
     let transactionMap = new Map()
 
     for (let transaction of transactionList) {
-        let referringPartnerAccountId = transaction['referringPartnerAccountId'];
+        let referringPartnerAccountId = transaction[REFERRING_PARTNER_ACCOUNT_ID];
         transactionMap[referringPartnerAccountId] = transactionMap[referringPartnerAccountId] || transactionMap.set(referringPartnerAccountId, []);
         transactionMap.get(referringPartnerAccountId).push(transaction)
     }
@@ -27,9 +29,9 @@ function transactionListToPartnerAccountMap(transactionList) {
 function lineNumberTotal(transactionMap) {
     let totalCount = 0
     totalCount += transactionMap.size
-    for (let [accountNumber, transactions] of transactionMap) {
+    transactionMap.forEach((transactions) => {
         totalCount += transactions.length
-    }
+    })
     return totalCount
 }
 
@@ -46,7 +48,7 @@ function generateHeader(lineNumberTotal) {
     return `V1.0|STARTFEED|Kard|${currentTimeStamp.toISOString()}|${lineNumberTotal}\n`
 }
 
-function generateFooter(totalCommission, totalTransactionAmount){
+function generateFooter(totalCommission, totalTransactionAmount) {
     return `ENDFEED|${totalCommission}|${totalTransactionAmount}`
 }
 
@@ -69,44 +71,32 @@ function generateTransactionLine(transaction) {
 }
 
 
-function processTransactionsToTxtFile(transactionMap) {
-    let [totalUserCommissionSum, totalTransactionAmountInCents] = [0,0];
-    let lineIndex = 1
+async function processTransactionsToTxtFile(transactionMap) {
+    let [totalUserCommissionSum, totalTransactionAmountInCents] = [0, 0];
 
-    fs.writeFileSync(TRANSACTION_RESULTS_PATH, generateHeader(lineNumberTotal(transactionMap)), (error) => {
-        if (error) {
-            console.log('something bad happened')
-        }
-    })
+    await fsPromises.writeFile(TRANSACTION_RESULTS_PATH, generateHeader(lineNumberTotal(transactionMap)))
 
     for (let [accountNumber, transactions] of transactionMap) {
         let accountHeader = generatePartnerAccountHeader(accountNumber, transactions)
-        fs.appendFileSync(TRANSACTION_RESULTS_PATH, `${lineIndex++}|${accountHeader}`, (error) => {
-            if (error) {
-                console.log('file Write failed')
-            }
-        })
+        await fsPromises.appendFile(TRANSACTION_RESULTS_PATH, `${lineIndex++}|${accountHeader}`)
 
         for (let transaction of transactions) {
             totalUserCommissionSum += transaction.commissionToUserInCents
             totalTransactionAmountInCents += transaction.transactionAmountInCents
-            fs.appendFileSync(TRANSACTION_RESULTS_PATH, `${lineIndex++}|${generateTransactionLine(transaction)}\n`)
+            await fsPromises.appendFile(TRANSACTION_RESULTS_PATH, `${lineIndex++}|${generateTransactionLine(transaction)}\n`)
         }
     }
-    fs.appendFileSync(TRANSACTION_RESULTS_PATH, generateFooter(totalUserCommissionSum, totalTransactionAmountInCents),(error) => {
-        if (error) {
-            console.log('something bad happened')
-        }
-    })
+    await fsPromises.appendFile(TRANSACTION_RESULTS_PATH, generateFooter(totalUserCommissionSum, totalTransactionAmountInCents))
 }
 
+
 export default function () {
+    let transactionMap;
+    getTransactionList().then((transactionList) => {
+        transactionMap = transactionListToPartnerAccountMap(transactionList);
 
-    let transactionList = getTransactionJsonObjectList();
-
-    let transactionMap = transactionListToPartnerAccountMap(transactionList);
-    /*
-        for(let[accountNumber, transactions] of transactionMap){
-        }*/
-    processTransactionsToTxtFile(transactionMap)
+        processTransactionsToTxtFile(transactionMap).then(() => {
+            console.log("Transactions successfully parsed")
+        })
+    });
 }
